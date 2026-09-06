@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Study Monitor AI - Live Web Edition</title>
+    <meta name="description" content="AI-powered Smart Study Monitor using Face Mesh and Object Detection to prevent drowsiness, face covering, and phone distractions.">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- MediaPipe FaceMesh -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <!-- TensorFlow.js & COCO-SSD for Phone Detection -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+
+    <style>
+        :root {
+            --bg-base: #090d16;
+            --card-bg: rgba(19, 27, 46, 0.75);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --accent-primary: #6366f1;
+            --accent-glow: rgba(99, 102, 241, 0.35);
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --success: #10b981;
+            --text-main: #f8fafc;
+            --text-sub: #94a3b8;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            background-image: 
+                radial-gradient(circle at 10% 10%, rgba(99, 102, 241, 0.15), transparent 40%),
+                radial-gradient(circle at 90% 90%, rgba(239, 68, 68, 0.1), transparent 45%);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            padding: 1.25rem 2.5rem;
+            border-bottom: 1px solid var(--card-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(9, 13, 22, 0.85);
+            backdrop-filter: blur(16px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+        }
+
+        .brand-icon {
+            font-size: 1.7rem;
+            filter: drop-shadow(0 0 10px rgba(99, 102, 241, 0.6));
+        }
+
+        .brand-title {
+            font-size: 1.35rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #fff, #a5b4fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .brand-pill {
+            font-size: 0.75rem;
+            background: rgba(99, 102, 241, 0.2);
+            color: #818cf8;
+            border: 1px solid rgba(99, 102, 241, 0.35);
+            padding: 0.2rem 0.6rem;
+            border-radius: 999px;
+            font-weight: 600;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .btn-start {
+            background: linear-gradient(135deg, #4f46e5, #6366f1);
+            color: #fff;
+            border: none;
+            padding: 0.65rem 1.4rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            border-radius: 0.75rem;
+            cursor: pointer;
+            box-shadow: 0 4px 20px var(--accent-glow);
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-start:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 25px rgba(99, 102, 241, 0.55);
+        }
+
+        .btn-start:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-mute {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--card-border);
+            color: var(--text-main);
+            padding: 0.65rem 1rem;
+            font-size: 0.9rem;
+            border-radius: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-mute:hover {
+            background: rgba(255, 255, 255, 0.12);
+        }
+
+        .layout {
+            max-width: 1440px;
+            width: 100%;
+            margin: 1.75rem auto;
+            padding: 0 1.5rem;
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            gap: 1.75rem;
+            flex: 1;
+        }
+
+        @media (max-width: 1050px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .stage-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 1.5rem;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .stage-view {
+            position: relative;
+            width: 100%;
+            background: #030712;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 520px;
+            border-radius: 1.5rem 1.5rem 0 0;
+            overflow: hidden;
+        }
+
+        #webcam {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+            width: 1px;
+            height: 1px;
+        }
+
+        #outputCanvas {
+            width: 100%;
+            height: 100%;
+            max-height: 640px;
+            object-fit: contain;
+            display: block;
+            transform: scaleX(-1); /* Mirror camera */
+        }
+
+        .placeholder-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 1.25rem;
+            background: rgba(9, 13, 22, 0.95);
+            z-index: 10;
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .placeholder-icon {
+            font-size: 3.5rem;
+            animation: float 3s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .alert-banner {
+            position: absolute;
+            top: 1.5rem;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 0.75rem 1.75rem;
+            border-radius: 1rem;
+            font-size: 1.15rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            display: none;
+            z-index: 20;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .alert-active {
+            display: block;
+            animation: bounce 0.4s ease infinite alternate;
+        }
+
+        .alert-danger {
+            background: rgba(239, 68, 68, 0.9);
+            color: #fff;
+            border: 2px solid #fca5a5;
+        }
+
+        .alert-warning {
+            background: rgba(245, 158, 11, 0.9);
+            color: #fff;
+            border: 2px solid #fde68a;
+        }
+
+        @keyframes bounce {
+            from { transform: translateX(-50%) translateY(0); }
+            to { transform: translateX(-50%) translateY(-6px); }
+        }
+
+        .stage-footer {
+            padding: 1.25rem 2rem;
+            background: rgba(15, 23, 42, 0.7);
+            border-top: 1px solid var(--card-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .live-status {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 10px var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .panel {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 1.25rem;
+            padding: 1.5rem;
+            backdrop-filter: blur(12px);
+        }
+
+        .panel-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        .metric-box {
+            background: rgba(15, 23, 42, 0.55);
+            border: 1px solid var(--card-border);
+            border-radius: 1rem;
+            padding: 1rem;
+            transition: all 0.2s ease;
+        }
+
+        .metric-box:hover {
+            border-color: rgba(99, 102, 241, 0.4);
+            transform: translateY(-2px);
+        }
+
+        .metric-title {
+            font-size: 0.75rem;
+            color: var(--text-sub);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.35rem;
+        }
+
+        .metric-val {
+            font-size: 1.6rem;
+            font-weight: 800;
+        }
+
+        .triggers-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.85rem;
+        }
+
+        .trigger-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(15, 23, 42, 0.4);
+            border: 1px solid var(--card-border);
+            padding: 0.85rem 1.1rem;
+            border-radius: 0.85rem;
+        }
+
+        .trigger-label {
+            font-size: 0.95rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .badge-state {
+            font-size: 0.8rem;
+            font-weight: 700;
+            padding: 0.3rem 0.75rem;
+            border-radius: 0.5rem;
+        }
+
+        .badge-safe {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .badge-danger {
+            background: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+        }
+
+        .badge-warning {
+            background: rgba(245, 158, 11, 0.2);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.4);
+        }
+
+        .info-list {
+            font-size: 0.85rem;
+            color: var(--text-sub);
+            line-height: 1.6;
+        }
+
+        .info-list li {
+            margin-left: 1.25rem;
+            margin-bottom: 0.4rem;
+        }
+
+        .permission-notice {
+            background: rgba(245, 158, 11, 0.15);
+            border: 1px solid rgba(245, 158, 11, 0.35);
+            border-radius: 0.75rem;
+            padding: 0.75rem 1rem;
+            font-size: 0.85rem;
+            color: #fde68a;
+            margin-top: 0.5rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Audio Elements -->
+    <audio id="audioSleep" src="alarm.mp3" preload="auto"></audio>
+    <audio id="audioFace" src="faudio.mp3" preload="auto"></audio>
+    <audio id="audioPhone" src="paudio.mp3" preload="auto"></audio>
+
+    <header>
+        <div class="brand">
+            <span class="brand-icon">🎯</span>
+            <div>
+                <span class="brand-title">Smart Study Monitor</span>
+                <span class="brand-pill">AI Web Edition</span>
+            </div>
+        </div>
+        <div class="header-actions">
+            <button id="btnMute" class="btn-mute">🔊 Mute Audio</button>
+            <button id="btnStart" class="btn-start">
+                <span>⚡</span> Start Webcam & AI
+            </button>
+        </div>
+    </header>
+
+    <main class="layout">
+        <!-- Live Video Screen -->
+        <div class="stage-card">
+            <div class="stage-view">
+                <div id="alertBanner" class="alert-banner alert-danger">
+                    WAKE UP & STUDY!
+                </div>
+
+                <div id="placeholder" class="placeholder-overlay">
+                    <div class="placeholder-icon">📷</div>
+                    <h2>Webcam Ready to Connect</h2>
+                    <p id="placeholderMsg" style="color: var(--text-sub); max-width: 420px; line-height: 1.5;">
+                        Click <strong>"Start Monitoring"</strong> to grant camera permission and activate the real-time AI engine.
+                    </p>
+                    <div id="permissionNotice" class="permission-notice">
+                        ⚠️ <strong>Camera Blocked:</strong> Click the <strong>camera icon 🔒</strong> in your browser address bar and select <strong>"Always allow"</strong>, then click Start again.
+                    </div>
+                    <button id="btnStartHero" class="btn-start" style="margin-top: 0.5rem;">Start Monitoring</button>
+                </div>
+
+                <!-- Hidden video element capturing media stream -->
+                <video id="webcam" playsinline autoplay muted></video>
+                <!-- Visible Canvas rendering video + overlays -->
+                <canvas id="outputCanvas"></canvas>
+            </div>
+
+            <div class="stage-footer">
+                <div class="live-status">
+                    <span id="statusDot" class="status-dot" style="background: #94a3b8; box-shadow: none;"></span>
+                    <span id="systemStatus">Ready to start</span>
+                </div>
+                <div style="font-size: 0.85rem; color: var(--text-sub);">
+                    MediaPipe &amp; TensorFlow.js
+                </div>
+            </div>
+        </div>
+
+        <!-- Telemetry & Trigger Sidebar -->
+        <div class="sidebar">
+            <div class="panel">
+                <div class="panel-title">
+                    <span>📊</span> Live Telemetry
+                </div>
+                <div class="metrics-grid">
+                    <div class="metric-box">
+                        <div class="metric-title">Eye Ratio</div>
+                        <div id="valRatio" class="metric-val">--</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-title">Face Mesh</div>
+                        <div id="valFaceMesh" class="metric-val" style="font-size: 1.15rem; padding-top: 6px;">Idle</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-title">Closed Frames</div>
+                        <div id="valClosedFrames" class="metric-val">0</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-title">Engine FPS</div>
+                        <div id="valFps" class="metric-val">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">
+                    <span>🛡️</span> Detection Alerts
+                </div>
+                <div class="triggers-list">
+                    <div class="trigger-item">
+                        <span class="trigger-label">😴 Drowsiness / Sleep</span>
+                        <span id="badgeSleep" class="badge-state badge-safe">Normal</span>
+                    </div>
+                    <div class="trigger-item">
+                        <span class="trigger-label">🙈 Face Covered</span>
+                        <span id="badgeFace" class="badge-state badge-safe">Visible</span>
+                    </div>
+                    <div class="trigger-item">
+                        <span class="trigger-label">📱 Cell Phone Distraction</span>
+                        <span id="badgePhone" class="badge-state badge-safe">None</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">
+                    <span>⚙️</span> Detection Rules
+                </div>
+                <ul class="info-list">
+                    <li><strong>Eye Distance Ratio:</strong> Eye distance &lt; 11% for 15 frames triggers sleep alarm.</li>
+                    <li><strong>Face Presence:</strong> Face missing for 20 frames triggers "Don't Cover Face" alert.</li>
+                    <li><strong>Phone Object Detection:</strong> Real-time COCO-SSD detection (&gt;45% confidence).</li>
+                    <li><strong>Client-Side Security:</strong> Camera feed runs locally in browser. 100% private.</li>
+                </ul>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // DOM Elements
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('outputCanvas');
+        const ctx = canvas.getContext('2d');
+        const btnStart = document.getElementById('btnStart');
+        const btnStartHero = document.getElementById('btnStartHero');
+        const btnMute = document.getElementById('btnMute');
+        const placeholder = document.getElementById('placeholder');
+        const placeholderMsg = document.getElementById('placeholderMsg');
+        const permissionNotice = document.getElementById('permissionNotice');
+        const alertBanner = document.getElementById('alertBanner');
+        const statusDot = document.getElementById('statusDot');
+        const systemStatus = document.getElementById('systemStatus');
+
+        const audioSleep = document.getElementById('audioSleep');
+        const audioFace = document.getElementById('audioFace');
+        const audioPhone = document.getElementById('audioPhone');
+
+        // Telemetry Elements
+        const valRatio = document.getElementById('valRatio');
+        const valFaceMesh = document.getElementById('valFaceMesh');
+        const valClosedFrames = document.getElementById('valClosedFrames');
+        const valFps = document.getElementById('valFps');
+        const badgeSleep = document.getElementById('badgeSleep');
+        const badgeFace = document.getElementById('badgeFace');
+        const badgePhone = document.getElementById('badgePhone');
+
+        // Landmarks Indices
+        const LEFT_EYE_TOP = 159;
+        const LEFT_EYE_BOTTOM = 145;
+        const FACE_LEFT = 130;
+        const FACE_RIGHT = 243;
+
+        const SLEEP_THRESHOLD_FRAMES = 15;
+        const COVER_THRESHOLD_FRAMES = 20;
+
+        let closedFrames = 0;
+        let coveredFrames = 0;
+        let isMuted = false;
+        let isRunning = false;
+        let isAiProcessing = false;
+        let cocoModel = null;
+        let faceMesh = null;
+        let detectedPhone = false;
+
+        let lastFrameTime = performance.now();
+        let frameCount = 0;
+        let currentPlaying = null;
+
+        function playAlertSound(audioElem) {
+            if (isMuted || !audioElem) return;
+            if (currentPlaying && !currentPlaying.ended) return;
+
+            currentPlaying = audioElem;
+            audioElem.currentTime = 0;
+            audioElem.play().catch(e => console.log('Audio autoplay:', e));
+        }
+
+        btnMute.addEventListener('click', () => {
+            isMuted = !isMuted;
+            btnMute.textContent = isMuted ? '🔇 Unmute Audio' : '🔊 Mute Audio';
+            if (isMuted && currentPlaying) {
+                currentPlaying.pause();
+            }
+        });
+
+        async function initAI() {
+            systemStatus.textContent = 'Loading AI Models...';
+            
+            // 1. MediaPipe FaceMesh
+            if (!faceMesh) {
+                faceMesh = new FaceMesh({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+                });
+
+                faceMesh.setOptions({
+                    maxNumFaces: 1,
+                    refineLandmarks: true,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+
+                faceMesh.onResults(onFaceMeshResults);
+            }
+
+            // 2. COCO-SSD for phone detection (async in background)
+            if (!cocoModel) {
+                cocoSsd.load().then(model => {
+                    cocoModel = model;
+                    console.log('COCO-SSD loaded');
+                }).catch(err => {
+                    console.warn('COCO-SSD phone detection load error:', err);
+                });
+            }
+        }
+
+        async function startMonitoring() {
+            btnStart.disabled = true;
+            btnStartHero.disabled = true;
+            permissionNotice.style.display = 'none';
+            systemStatus.textContent = 'Requesting Camera Access...';
+
+            let stream = null;
+            try {
+                // Try ideal resolution with facing user
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        facingMode: 'user'
+                    },
+                    audio: false
+                });
+            } catch (err1) {
+                console.warn('Ideal camera constraint failed, attempting fallback:', err1);
+                try {
+                    // Fallback to plain video constraint
+                    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                } catch (err2) {
+                    console.error('Camera access failed:', err2);
+                    btnStart.disabled = false;
+                    btnStartHero.disabled = false;
+
+                    if (err2.name === 'NotAllowedError' || err2.name === 'PermissionDeniedError') {
+                        systemStatus.textContent = 'Camera Blocked by Browser';
+                        placeholderMsg.innerHTML = '<span style="color: #f87171;">Camera permission was blocked.</span> Please click the camera/lock icon in your browser URL bar and click <strong>Allow</strong>.';
+                        permissionNotice.style.display = 'block';
+                    } else if (err2.name === 'NotReadableError' || err2.name === 'TrackStartError') {
+                        systemStatus.textContent = 'Camera In Use by Another App';
+                        placeholderMsg.innerHTML = '<span style="color: #f87171;">Camera is currently being used by another app</span> (e.g. Python terminal, Zoom). Please close other camera apps and try again.';
+                    } else {
+                        systemStatus.textContent = 'Camera Error: ' + (err2.name || err2.message);
+                        placeholderMsg.textContent = 'Camera Error: ' + err2.message;
+                    }
+                    return;
+                }
+            }
+
+            placeholder.style.display = 'none';
+            systemStatus.textContent = 'Camera connected. Initializing AI...';
+
+            video.srcObject = stream;
+            video.onloadedmetadata = async () => {
+                await video.play();
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+                isRunning = true;
+
+                statusDot.style.background = '#10b981';
+                statusDot.style.boxShadow = '0 0 10px #10b981';
+                systemStatus.textContent = 'Active & Monitoring';
+
+                await initAI();
+
+                // Start continuous frame processing loop
+                requestAnimationFrame(processLoop);
+
+                // Start phone detection loop
+                detectPhoneLoop();
+            };
+        }
+
+        btnStart.addEventListener('click', startMonitoring);
+        btnStartHero.addEventListener('click', startMonitoring);
+
+        async function processLoop() {
+            if (!isRunning) return;
+
+            if (video.readyState >= 2 && !isAiProcessing && faceMesh) {
+                isAiProcessing = true;
+                try {
+                    await faceMesh.send({ image: video });
+                } catch (e) {
+                    console.warn('FaceMesh frame processing error:', e);
+                }
+                isAiProcessing = false;
+            }
+
+            requestAnimationFrame(processLoop);
+        }
+
+        function euclideanDist(p1, p2, width, height) {
+            const x = (p1.x - p2.x) * width;
+            const y = (p1.y - p2.y) * height;
+            return Math.sqrt(x * x + y * y);
+        }
+
+        async function detectPhoneLoop() {
+            if (!isRunning) return;
+
+            if (cocoModel && video.readyState >= 2) {
+                try {
+                    const predictions = await cocoModel.detect(video);
+                    detectedPhone = false;
+
+                    predictions.forEach(pred => {
+                        if (pred.class === 'cell phone' && pred.score > 0.45) {
+                            detectedPhone = true;
+                        }
+                    });
+                } catch (e) {
+                    console.warn('Phone detection frame error:', e);
+                }
+            }
+
+            setTimeout(detectPhoneLoop, 350);
+        }
+
+        function onFaceMeshResults(results) {
+            frameCount++;
+            const now = performance.now();
+            if (now - lastFrameTime >= 1000) {
+                valFps.textContent = frameCount;
+                frameCount = 0;
+                lastFrameTime = now;
+            }
+
+            ctx.save();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+            let isSleepy = false;
+            let isFaceCovered = false;
+            let ratio = 0;
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                coveredFrames = 0;
+                const landmarks = results.multiFaceLandmarks[0];
+
+                const eyeDist = euclideanDist(landmarks[LEFT_EYE_TOP], landmarks[LEFT_EYE_BOTTOM], canvas.width, canvas.height);
+                const faceDist = euclideanDist(landmarks[FACE_LEFT], landmarks[FACE_RIGHT], canvas.width, canvas.height);
+
+                if (faceDist > 0) {
+                    ratio = (eyeDist / faceDist) * 100;
+                }
+
+                if (ratio < 11.0) {
+                    closedFrames++;
+                } else {
+                    closedFrames = 0;
+                }
+
+                if (closedFrames >= SLEEP_THRESHOLD_FRAMES) {
+                    isSleepy = true;
+                }
+
+                valRatio.textContent = Math.round(ratio);
+                valFaceMesh.textContent = 'Tracked';
+                valFaceMesh.style.color = '#34d399';
+            } else {
+                closedFrames = 0;
+                coveredFrames++;
+                if (coveredFrames >= COVER_THRESHOLD_FRAMES) {
+                    isFaceCovered = true;
+                }
+                valRatio.textContent = '--';
+                valFaceMesh.textContent = 'Searching';
+                valFaceMesh.style.color = '#f59e0b';
+            }
+
+            valClosedFrames.textContent = closedFrames;
+
+            // Priority 1: Face covered
+            if (isFaceCovered) {
+                badgeFace.className = 'badge-state badge-danger';
+                badgeFace.textContent = 'COVERED!';
+                showAlert('DONT COVER YOUR FACE!', 'alert-danger');
+                playAlertSound(audioFace);
+            } else {
+                badgeFace.className = 'badge-state badge-safe';
+                badgeFace.textContent = 'Visible';
+            }
+
+            // Priority 2: Sleep warning
+            if (isSleepy) {
+                badgeSleep.className = 'badge-state badge-danger';
+                badgeSleep.textContent = 'SLEEPING!';
+                showAlert('WAKE UP & STUDY!', 'alert-danger');
+                playAlertSound(audioSleep);
+            } else {
+                badgeSleep.className = 'badge-state badge-safe';
+                badgeSleep.textContent = 'Awake';
+            }
+
+            // Priority 3: Phone distraction
+            if (detectedPhone) {
+                badgePhone.className = 'badge-state badge-warning';
+                badgePhone.textContent = 'PHONE DETECTED!';
+                if (!isFaceCovered && !isSleepy) {
+                    showAlert('PUT THE PHONE AWAY!', 'alert-warning');
+                    playAlertSound(audioPhone);
+                }
+            } else {
+                badgePhone.className = 'badge-state badge-safe';
+                badgePhone.textContent = 'None';
+            }
+
+            if (!isFaceCovered && !isSleepy && !detectedPhone) {
+                hideAlert();
+            }
+
+            ctx.restore();
+        }
+
+        function showAlert(msg, typeClass) {
+            alertBanner.textContent = msg;
+            alertBanner.className = `alert-banner alert-active ${typeClass}`;
+        }
+
+        function hideAlert() {
+            alertBanner.className = 'alert-banner';
+        }
+    </script>
+</body>
+</html>
